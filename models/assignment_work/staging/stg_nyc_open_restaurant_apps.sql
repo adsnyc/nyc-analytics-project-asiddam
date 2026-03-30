@@ -1,20 +1,22 @@
-WITH source AS (
+{{ config(
+    schema='nyc_transit_restaurants_staging'
+) }}
 
-    SELECT *
-    FROM {{ source('raw', 'source_nyc_open_restaurant_apps') }}
+-- Clean and standardize restaurant application data
+-- One row per application
 
-),
-
-cleaned AS (
+WITH cleaned AS (
 
     SELECT
 
-        -- remove raw columns we will redefine
+        -- keep everything except columns we will redefine
         * EXCEPT (
             objectid,
             time_of_submission,
             borough,
-            zip
+            zip,
+            latitude,
+            longitude
         ),
 
         -- primary key
@@ -23,40 +25,28 @@ cleaned AS (
         -- timestamp
         CAST(time_of_submission AS TIMESTAMP) AS submission_timestamp,
 
-        -- borough standardization (light cleaning only)
+        -- borough cleaning (same style as Part 4)
         TRIM(CAST(borough AS STRING)) AS borough,
 
-        -- ZIP cleaning (as professor hinted)
-        CASE 
+        -- zip cleaning (simple like professor expectation)
+        CASE
             WHEN zip IS NULL THEN NULL
             WHEN LENGTH(TRIM(zip)) = 5 THEN TRIM(zip)
             ELSE NULL
         END AS zip_code,
 
-        -- optional light casting (not overdoing)
+        -- light casting
         CAST(latitude AS FLOAT64) AS latitude,
         CAST(longitude AS FLOAT64) AS longitude,
 
-        -- keep rest mostly as-is (small dataset → less cleaning)
+        -- metadata
         CURRENT_TIMESTAMP() AS _stg_loaded_at
 
-    FROM source
+    FROM {{ source('raw', 'source_nyc_open_restaurant_apps') }}
 
-    WHERE
-        objectid IS NOT NULL
-        AND time_of_submission IS NOT NULL
-
-),
-
-deduplicated AS (
-
-    SELECT *
-    FROM cleaned
-    QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY application_id
-        ORDER BY submission_timestamp DESC
-    ) = 1
+    WHERE objectid IS NOT NULL
+    AND time_of_submission IS NOT NULL
 
 )
 
-SELECT * FROM deduplicated;
+SELECT * FROM cleaned
